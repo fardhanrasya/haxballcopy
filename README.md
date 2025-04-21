@@ -1,61 +1,31 @@
-# Game Sepak Bola Multiplayer (HaxBall Clone)
+# Game Sepak Bola Sederhana (HaxBall Clone)
 
-Game sepak bola berbasis web multiplayer yang terinspirasi oleh HaxBall.
+Game sepak bola berbasis web sederhana yang terinspirasi oleh HaxBall.
+
+## Cara Bermain
+
+1. Buka file `index.html` di browser untuk memulai game
+2. Gunakan tombol berikut untuk bermain:
+   - **W**: Bergerak ke atas
+   - **A**: Bergerak ke kiri
+   - **S**: Bergerak ke bawah
+   - **D**: Bergerak ke kanan
+   - **Spasi**: Menendang bola (jika cukup dekat dengan bola)
 
 ## Fitur
 
-- Permainan multiplayer real-time menggunakan WebSocket
-- Pemain bisa bergerak, menendang, mengoper dan mendribble bola
-- Sistem energi untuk berlari
-- Ultimate gauge yang terisi saat dribbling untuk tendangan super
+- Pemain yang bisa dikendalikan (karakter merah)
 - Fisika bola realistis
 - Sistem skor otomatis
 - Gawang di kedua sisi lapangan
 
-## Cara Bermain
-
-### Setup Server
-
-1. Install dependensi:
-
-   ```
-   npm install
-   ```
-
-2. Jalankan server:
-
-   ```
-   npm start
-   ```
-
-3. Buka browser di alamat http://localhost:3000
-
-### Kontrol Permainan
-
-- **W**: Bergerak ke atas
-- **A**: Bergerak ke kiri
-- **S**: Bergerak ke bawah
-- **D**: Bergerak ke kanan
-- **K**: Dribbling bola (menempel pada pemain)
-- **J**: Pass/mengoper bola
-- **Spasi**: Menendang bola (jika cukup dekat dengan bola)
-- **L**: Berlari (energi akan berkurang)
-
-## Teknologi yang Digunakan
-
-- **Frontend**: HTML5 Canvas, JavaScript vanilla
-- **Backend**: Node.js, Express, WebSocket (ws)
-- **Komunikasi**: Protokol WebSocket untuk permainan real-time
-
 ## Pengembangan
 
-Game ini masih bisa dikembangkan lebih lanjut dengan:
+Game ini dibuat menggunakan JavaScript murni dengan HTML Canvas untuk rendering.
+Bebas dimodifikasi dan dikembangkan untuk fitur tambahan seperti:
 
-- Menambahkan otentikasi pemain
-- Membuat sistem room/lobby
-- Menambahkan chat dalam game
-- Meningkatkan sistem kolisi dan fisika
-- Menambahkan fitur AI untuk pemain komputer
+- Menambah pemain lawan (AI)
+- Menambah multiplayer
 - Menambahkan efek suara dan musik
 - Menambahkan mode permainan lain
 

@@ -47,39 +47,22 @@ const OUT_MESSAGE_DURATION = 90; // Durasi tampilan pesan OUT dalam frame (sekit
 let goalMessageTimer = 0;
 const GOAL_MESSAGE_DURATION = 120; // Durasi tampilan pesan GOAL dalam frame (sekitar 2 detik pada 60fps)
 
-// WebSocket setup
-let socket;
-let playerId;
-let gameState = {
-  ball: {
-    x: canvas.width / 2,
-    y: canvas.height / 2,
-    radius: BALL_RADIUS,
-    color: "white",
-    velocityX: 0,
-    velocityY: 0,
-  },
-  players: {},
-  score: { team1: 0, team2: 0 },
-};
-
-// Objek Game (player lokal)
+// Objek Game
 const player = {
   x: canvas.width / 4,
   y: canvas.height / 2,
   radius: PLAYER_RADIUS,
   color: "red",
-  speed: PLAYER_WALK_SPEED,
+  speed: PLAYER_WALK_SPEED, // Default speed adalah berjalan
   velocityX: 0,
   velocityY: 0,
   isKicking: false,
   isRunning: false,
-  isDribbling: false,
-  energy: MAX_ENERGY,
-  ultimateGauge: 0,
+  isDribbling: false, // Status dribbling
+  energy: MAX_ENERGY, // Energi awal maksimal
+  ultimateGauge: 0, // Ultimate gauge dimulai dari 0
 };
 
-// Bola lokal (akan disinkronkan dengan server)
 const ball = {
   x: canvas.width / 2,
   y: canvas.height / 2,
@@ -89,7 +72,6 @@ const ball = {
   velocityY: 0,
 };
 
-// Tetapkan posisi gawang
 const goals = [
   {
     x: 0,
@@ -106,120 +88,6 @@ const goals = [
     team: 1,
   },
 ];
-
-// Inisialisasi WebSocket connection
-function initWebSocket() {
-  // Gunakan lokasi host saat ini untuk WebSocket connection
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${protocol}//${window.location.host}`;
-
-  socket = new WebSocket(wsUrl);
-
-  socket.onopen = () => {
-    console.log("Terhubung ke server WebSocket");
-  };
-
-  socket.onmessage = (event) => {
-    const message = JSON.parse(event.data);
-
-    if (message.type === "init") {
-      // Menyimpan ID pemain dari server
-      playerId = message.id;
-
-      // Initialize game state dari server
-      updateGameStateFromServer(message.gameState);
-
-      console.log(`Terhubung sebagai player ${playerId}`);
-    } else if (message.type === "gameState") {
-      // Update game state dari server
-      updateGameStateFromServer(message.gameState);
-    }
-  };
-
-  socket.onclose = () => {
-    console.log("Terputus dari server WebSocket");
-  };
-
-  socket.onerror = (error) => {
-    console.error("WebSocket Error:", error);
-  };
-}
-
-// Update game state lokal dari data server
-function updateGameStateFromServer(serverState) {
-  // Update skor
-  gameState.score = serverState.score;
-  document.getElementById("team1").textContent = gameState.score.team1;
-  document.getElementById("team2").textContent = gameState.score.team2;
-
-  // Update players lain
-  gameState.players = serverState.players;
-
-  // Update ball jika bukan kita yang mengendalikannya
-  if (!player.isDribbling) {
-    Object.assign(ball, serverState.ball);
-  }
-
-  // Update player lokal dari server
-  if (gameState.players[playerId]) {
-    // Hanya update properti yang tidak dikendalikan secara lokal
-    const serverPlayer = gameState.players[playerId];
-    player.team = serverPlayer.team;
-    player.color = serverPlayer.color;
-  }
-}
-
-// Kirim update state pemain ke server
-function sendPlayerUpdate() {
-  if (!socket || socket.readyState !== WebSocket.OPEN) return;
-
-  socket.send(
-    JSON.stringify({
-      type: "playerUpdate",
-      player: {
-        x: player.x,
-        y: player.y,
-        velocityX: player.velocityX,
-        velocityY: player.velocityY,
-        isKicking: player.isKicking,
-        isRunning: player.isRunning,
-        isDribbling: player.isDribbling,
-        ultimateGauge: player.ultimateGauge,
-      },
-    })
-  );
-}
-
-// Kirim update bola ke server jika kita mengendalikannya
-function sendBallUpdate() {
-  if (!socket || socket.readyState !== WebSocket.OPEN) return;
-
-  if (player.isDribbling || player.isKicking) {
-    socket.send(
-      JSON.stringify({
-        type: "ballUpdate",
-        ball: {
-          x: ball.x,
-          y: ball.y,
-          velocityX: ball.velocityX,
-          velocityY: ball.velocityY,
-        },
-      })
-    );
-  }
-}
-
-// Kirim pesan gol ke server
-function sendGoalMessage(team) {
-  if (!socket || socket.readyState !== WebSocket.OPEN) return;
-
-  socket.send(
-    JSON.stringify({
-      type: "goal",
-      team: team,
-    })
-  );
-}
 
 // Input handling
 const keys = {};
@@ -523,13 +391,19 @@ function checkGoal() {
       ball.y > goal.y &&
       ball.y < goal.y + goal.height
     ) {
-      // Gol terjadi, kirim pesan ke server
-      sendGoalMessage(goal.team);
+      // Gol terjadi, update skor
+      if (goal.team === 1) {
+        scoreTeam1++;
+        document.getElementById("team1").textContent = scoreTeam1;
+      } else {
+        scoreTeam2++;
+        document.getElementById("team2").textContent = scoreTeam2;
+      }
 
       // Aktifkan pesan GOAL
       goalMessageTimer = GOAL_MESSAGE_DURATION;
 
-      // Reset posisi bola (server akan melakukan broadcast untuk sinkronisasi)
+      // Reset posisi bola
       resetBall();
       break;
     }
@@ -562,8 +436,11 @@ function render() {
     ctx.fillRect(goal.x, goal.y, goal.width, goal.height);
   }
 
-  // Gambar semua pemain
-  renderPlayers();
+  // Gambar pemain
+  ctx.fillStyle = player.color;
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+  ctx.fill();
 
   // Gambar ultimate gauge di sekitar pemain jika ada
   if (player.ultimateGauge > 0) {
@@ -800,59 +677,14 @@ function showPassEffect() {
   drawPassEffect();
 }
 
-// Fungsi untuk menggambar semua pemain dari game state
-function renderPlayers() {
-  // Gambar semua pemain dari game state
-  Object.values(gameState.players).forEach((otherPlayer) => {
-    // Skip pemain lokal karena kita menggambarnya secara terpisah
-    if (otherPlayer.id === playerId) return;
-
-    // Gambar pemain
-    ctx.fillStyle = otherPlayer.color;
-    ctx.beginPath();
-    ctx.arc(otherPlayer.x, otherPlayer.y, PLAYER_RADIUS, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Gambar nama atau ID pemain di atas karakter
-    ctx.fillStyle = "white";
-    ctx.font = "12px Arial";
-    ctx.textAlign = "center";
-    ctx.fillText(
-      `Player ${otherPlayer.id}`,
-      otherPlayer.x,
-      otherPlayer.y - PLAYER_RADIUS - 5
-    );
-  });
-
-  // Gambar pemain lokal
-  ctx.fillStyle = player.color;
-  ctx.beginPath();
-  ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Gambar ultimate gauge dan efek lainnya untuk pemain lokal
-  // ... existing code for rendering ultimate gauge ...
-}
-
-// Game loop yang diperbarui untuk multiplayer
+// Game loop
 function gameLoop() {
   updatePlayerPosition();
   updateBallPosition();
-
-  // Kirim update ke server
-  sendPlayerUpdate();
-  sendBallUpdate();
-
   render();
   requestAnimationFrame(gameLoop);
 }
 
-// Start the game
-function startGame() {
-  initWebSocket();
-  resetBall();
-  gameLoop();
-}
-
-// Start everything
-window.addEventListener("load", startGame);
+// Mulai game
+resetBall();
+gameLoop();
