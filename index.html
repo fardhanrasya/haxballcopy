@@ -1,25 +1,113 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>HaxBall Clone</title>
-    <link rel="stylesheet" href="style.css" />
+    <title>Soccer Multiplayer Game</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 20px;
+        background-color: #222;
+        color: white;
+        font-family: Arial, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+      }
+
+      .game-container {
+        position: relative;
+        margin-bottom: 20px;
+      }
+
+      canvas {
+        border: 2px solid #444;
+        background: #000;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+      }
+
+      .scoreboard {
+        display: flex;
+        justify-content: center;
+        gap: 40px;
+        margin-bottom: 20px;
+        font-size: 24px;
+      }
+
+      .team {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .red-team {
+        color: #ff4444;
+      }
+
+      .blue-team {
+        color: #4444ff;
+      }
+
+      .score {
+        background-color: rgba(0, 0, 0, 0.3);
+        padding: 5px 15px;
+        border-radius: 5px;
+        font-weight: bold;
+      }
+
+      .controls {
+        background-color: rgba(0, 0, 0, 0.3);
+        padding: 15px;
+        border-radius: 5px;
+        margin-top: 10px;
+        text-align: center;
+        max-width: 600px;
+      }
+
+      .key {
+        display: inline-block;
+        background-color: #444;
+        color: white;
+        padding: 5px 10px;
+        border-radius: 4px;
+        margin: 0 5px;
+        font-family: monospace;
+      }
+    </style>
   </head>
   <body>
-    <div class="game-container">
-      <canvas id="gameCanvas"></canvas>
-      <div class="score-board">
-        <div class="team" id="team1">0</div>
-        <div class="team" id="team2">0</div>
+    <div class="scoreboard">
+      <div class="team red-team">
+        <span>Tim Merah</span>
+        <span id="team1" class="score">0</span>
+      </div>
+      <div class="team blue-team">
+        <span>Tim Biru</span>
+        <span id="team2" class="score">0</span>
       </div>
     </div>
-    <div class="controls-info">
+
+    <div class="game-container">
+      <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <div class="controls">
       <p>
-        Kontrol: W,A,S,D untuk bergerak, Spasi untuk menendang bola, L untuk
-        berlari, K untuk dribbling, J untuk pass
+        Bergerak: <span class="key">W</span> <span class="key">A</span>
+        <span class="key">S</span> <span class="key">D</span> | Lari:
+        <span class="key">L</span> | Dribbling: <span class="key">K</span> |
+        Pass: <span class="key">J</span> | Tendang:
+        <span class="key">Space</span>
       </p>
     </div>
+
+    <!-- Socket.IO -->
+    <script src="/socket.io/socket.io.js"></script>
+
+    <!-- Game Logic -->
     <script src="game.js"></script>
   </body>
 </html>

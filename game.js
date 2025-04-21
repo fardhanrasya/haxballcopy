@@ -4,6 +4,12 @@ const ctx = canvas.getContext("2d");
 canvas.width = 1000;
 canvas.height = 600;
 
+// Konfigurasi Multiplayer
+const socket = io(); // Perlu menyertakan socket.io-client
+let playerId; // ID pemain ini
+let players = {}; // Semua pemain yang terhubung
+let gameStarted = false;
+
 // Skor
 let scoreTeam1 = 0;
 let scoreTeam2 = 0;
@@ -18,8 +24,8 @@ const BALL_FRICTION = 0.99;
 const PLAYER_SPEED = 2;
 const PLAYER_WALK_SPEED = PLAYER_SPEED / 1.5;
 const PLAYER_RUN_SPEED = PLAYER_SPEED * 1.5;
-const KICK_POWER = 7;
-const PASS_POWER = 4; // Kekuatan pass lebih lemah dari tendangan tapi lebih presisi
+const KICK_POWER = 8;
+const PASS_POWER = 5; // Kekuatan pass lebih lemah dari tendangan tapi lebih presisi
 const MAX_ENERGY = 100;
 const ENERGY_DRAIN_RATE = 0.8;
 const ENERGY_RECOVERY_RATE = 0.3;
@@ -47,7 +53,7 @@ const OUT_MESSAGE_DURATION = 90; // Durasi tampilan pesan OUT dalam frame (sekit
 let goalMessageTimer = 0;
 const GOAL_MESSAGE_DURATION = 120; // Durasi tampilan pesan GOAL dalam frame (sekitar 2 detik pada 60fps)
 
-// Objek Game
+// Objek Game - sekarang hanya client representation
 const player = {
   x: canvas.width / 4,
   y: canvas.height / 2,
@@ -59,8 +65,10 @@ const player = {
   isKicking: false,
   isRunning: false,
   isDribbling: false, // Status dribbling
+  isTackling: false, // Status tackling
   energy: MAX_ENERGY, // Energi awal maksimal
   ultimateGauge: 0, // Ultimate gauge dimulai dari 0
+  team: 1, // Default team
 };
 
 const ball = {
@@ -101,18 +109,23 @@ window.addEventListener("keydown", (e) => {
     // Lepaskan dribbling saat berlari
     if (player.isDribbling) {
       player.isDribbling = false;
-      releaseBall();
+      sendInput("releaseBall");
     }
   }
 
   // Toggle mode dribbling dengan tombol K
   if (e.key.toLowerCase() === "k") {
-    toggleDribble();
+    sendInput("toggleDribble");
   }
 
   // Melakukan pass dengan tombol J
   if (e.key.toLowerCase() === "j") {
-    passBall();
+    sendInput("passBall");
+  }
+
+  // Melakukan tackle dengan tombol H
+  if (e.key.toLowerCase() === "h") {
+    sendInput("tackleBall");
   }
 
   // Memulai tendangan dengan spasi
@@ -122,9 +135,12 @@ window.addEventListener("keydown", (e) => {
       player.isDribbling = false;
     }
     // Tendang bola
-    kickBall();
+    sendInput("kickBall");
     player.isKicking = true;
   }
+
+  // Kirim update status ke server setiap kali input berubah
+  sendPlayerState();
 });
 
 window.addEventListener("keyup", (e) => {
@@ -138,9 +154,101 @@ window.addEventListener("keyup", (e) => {
   if (e.key.toLowerCase() === "l") {
     player.isRunning = false;
   }
+
+  // Kirim update status ke server setiap kali input berubah
+  sendPlayerState();
 });
 
-// Deteksi tabrakan antara dua lingkaran
+// ============== NETWORKING CODE ==============
+
+// Fungsi untuk mengirim input ke server
+function sendInput(action) {
+  socket.emit("playerInput", {
+    action: action,
+    playerId: playerId,
+  });
+}
+
+// Fungsi untuk mengirim state pemain ke server
+function sendPlayerState() {
+  if (!playerId) return;
+
+  socket.emit("playerState", {
+    id: playerId,
+    x: player.x,
+    y: player.y,
+    velocityX: player.velocityX,
+    velocityY: player.velocityY,
+    isKicking: player.isKicking,
+    isRunning: player.isRunning,
+    isDribbling: player.isDribbling,
+    energy: player.energy,
+    ultimateGauge: player.ultimateGauge,
+    team: player.team,
+    isTackling: player.isTackling,
+    keys: keys, // Kirim status tombol untuk prediksi di server
+  });
+}
+
+// Event listeners untuk socket
+socket.on("connect", () => {
+  console.log("Connected to server!");
+});
+
+socket.on("playerId", (id) => {
+  playerId = id;
+  console.log(`Player assigned ID: ${playerId}`);
+});
+
+socket.on("teamAssignment", (teamNumber) => {
+  player.team = teamNumber;
+  player.color = teamNumber === 1 ? "red" : "blue";
+  console.log(`Assigned to team ${teamNumber}`);
+});
+
+socket.on("gameState", (gameState) => {
+  // Update game state berdasarkan data dari server
+  ball.x = gameState.ball.x;
+  ball.y = gameState.ball.y;
+  ball.velocityX = gameState.ball.velocityX;
+  ball.velocityY = gameState.ball.velocityY;
+
+  players = gameState.players;
+
+  // Update score
+  scoreTeam1 = gameState.score.team1;
+  scoreTeam2 = gameState.score.team2;
+
+  // Update tampilan skor di UI
+  document.getElementById("team1").textContent = scoreTeam1;
+  document.getElementById("team2").textContent = scoreTeam2;
+
+  // Update pesan-pesan
+  if (gameState.outMessage) {
+    isBallOut = true;
+    outMessageTimer = OUT_MESSAGE_DURATION;
+  }
+
+  if (gameState.goalMessage) {
+    goalMessageTimer = GOAL_MESSAGE_DURATION;
+  }
+
+  // Update local player data jika ada
+  if (players[playerId]) {
+    // Hanya update status yang perlu sinkronisasi dari server (tidak termasuk input lokal)
+    player.isDribbling = players[playerId].isDribbling;
+    player.ultimateGauge = players[playerId].ultimateGauge;
+    player.energy = players[playerId].energy;
+    player.isTackling = players[playerId].isTackling;
+  }
+});
+
+socket.on("gameStarted", () => {
+  gameStarted = true;
+  console.log("Game dimulai!");
+});
+
+// Deteksi tabrakan antara dua lingkaran (digunakan untuk rendering client-side)
 function circleCollision(circle1, circle2) {
   const dx = circle1.x - circle2.x;
   const dy = circle1.y - circle2.y;
@@ -167,8 +275,6 @@ function updatePlayerPosition() {
   if (player.isRunning && isMoving && player.energy > 0) {
     // Mode berlari saat bergerak
     player.speed = PLAYER_RUN_SPEED;
-    // Kurangi energi hanya saat berlari DAN bergerak
-    player.energy = Math.max(0, player.energy - ENERGY_DRAIN_RATE);
   } else {
     // Mode berjalan atau tidak bergerak
     player.speed = PLAYER_WALK_SPEED;
@@ -177,28 +283,6 @@ function updatePlayerPosition() {
       player.isRunning = false;
     }
   }
-
-  // Pulihkan energi jika tidak bergerak, terlepas dari tombol L
-  if (!isMoving) {
-    player.energy = Math.min(MAX_ENERGY, player.energy + ENERGY_RECOVERY_RATE);
-  } else if (!player.isRunning) {
-    // Atau jika bergerak tapi tidak berlari (berjalan)
-    player.energy = Math.min(
-      MAX_ENERGY,
-      player.energy + ENERGY_RECOVERY_RATE * 0.5
-    );
-  }
-
-  // Isi ultimate gauge jika bergerak dalam mode dribbling
-  if (player.isDribbling && isMoving) {
-    player.ultimateGauge = Math.min(
-      MAX_ULTIMATE_GAUGE,
-      player.ultimateGauge + ULTIMATE_GAIN_RATE
-    );
-  }
-
-  // Memindahkan logika tendangan ke event listener untuk tombol spasi
-  // sehingga tidak ada lagi pengecekan tendangan di sini
 
   // Update posisi
   player.x += player.velocityX;
@@ -211,215 +295,9 @@ function updatePlayerPosition() {
   if (player.y - player.radius < 0) player.y = player.radius;
   if (player.y + player.radius > canvas.height)
     player.y = canvas.height - player.radius;
-}
 
-// Tendang bola jika pemain cukup dekat
-function kickBall() {
-  const dx = ball.x - player.x;
-  const dy = ball.y - player.y;
-  const distance = Math.sqrt(dx * dx + dy * dy);
-
-  if (distance < player.radius + ball.radius + 5) {
-    const angle = Math.atan2(dy, dx);
-    let power = KICK_POWER;
-
-    // Jika ultimate gauge penuh, tendangan lebih kuat
-    if (player.ultimateGauge >= MAX_ULTIMATE_GAUGE) {
-      power *= ULTIMATE_KICK_MULTIPLIER;
-      player.ultimateGauge = 0; // Reset ultimate gauge setelah digunakan
-    }
-
-    ball.velocityX = Math.cos(angle) * power;
-    ball.velocityY = Math.sin(angle) * power;
-  }
-}
-
-// Fungsi untuk toggle mode dribbling
-function toggleDribble() {
-  const dx = ball.x - player.x;
-  const dy = ball.y - player.y;
-  const distance = Math.sqrt(dx * dx + dy * dy);
-
-  // Hanya bisa dribble jika dekat dengan bola
-  if (distance < PLAYER_RADIUS + BALL_RADIUS * 3) {
-    player.isDribbling = !player.isDribbling;
-
-    // Jika berhenti dribbling, beri sedikit dorongan ke bola
-    if (!player.isDribbling) {
-      releaseBall();
-    }
-  }
-}
-
-// Fungsi untuk melepaskan bola dari dribbling
-function releaseBall() {
-  if (player.velocityX !== 0 || player.velocityY !== 0) {
-    const speed = Math.sqrt(
-      player.velocityX * player.velocityX + player.velocityY * player.velocityY
-    );
-    const dirX = player.velocityX / speed;
-    const dirY = player.velocityY / speed;
-
-    ball.velocityX = dirX * speed * 0.8;
-    ball.velocityY = dirY * speed * 0.8;
-  }
-}
-
-// Update posisi bola
-function updateBallPosition() {
-  // Jika dalam mode dribbling, bola mengikuti pemain
-  if (player.isDribbling) {
-    // Tentukan posisi bola berdasarkan arah gerakan pemain
-    if (player.velocityX !== 0 || player.velocityY !== 0) {
-      // Jika pemain bergerak, bola berada di depan pemain berdasarkan arah gerakan
-      const moveSpeed = Math.sqrt(
-        player.velocityX * player.velocityX +
-          player.velocityY * player.velocityY
-      );
-      const moveAngle = Math.atan2(player.velocityY, player.velocityX);
-
-      // Bola berada sedikit di depan pemain dalam arah gerakan
-      const targetX = player.x + Math.cos(moveAngle) * DRIBBLE_DISTANCE;
-      const targetY = player.y + Math.sin(moveAngle) * DRIBBLE_DISTANCE;
-
-      // Gerakan bola menuju posisi ideal dengan efek smoothing
-      ball.velocityX =
-        (targetX - ball.x) * (1 - DRIBBLE_STRENGTH) + player.velocityX * 0.8;
-      ball.velocityY =
-        (targetY - ball.y) * (1 - DRIBBLE_STRENGTH) + player.velocityY * 0.8;
-
-      // Tambahkan sedikit variasi pada bola saat dribbling
-      ball.velocityX += Math.random() * 0.2 - 0.1;
-      ball.velocityY += Math.random() * 0.2 - 0.1;
-    } else {
-      // Jika pemain diam, bola tetap dekat dengan pemain
-      const dx = ball.x - player.x;
-      const dy = ball.y - player.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-
-      if (distance > 0) {
-        const dirX = dx / distance;
-        const dirY = dy / distance;
-
-        // Target posisi ideal untuk dribbling saat diam
-        const targetX = player.x + dirX * DRIBBLE_DISTANCE;
-        const targetY = player.y + dirY * DRIBBLE_DISTANCE;
-
-        // Gerakan bola menuju posisi ideal
-        ball.velocityX = (targetX - ball.x) * (1 - DRIBBLE_STRENGTH);
-        ball.velocityY = (targetY - ball.y) * (1 - DRIBBLE_STRENGTH);
-      }
-    }
-  } else {
-    // Terapkan friction pada bola seperti biasa
-    ball.velocityX *= BALL_FRICTION;
-    ball.velocityY *= BALL_FRICTION;
-  }
-
-  // Update posisi bola
-  ball.x += ball.velocityX;
-  ball.y += ball.velocityY;
-
-  // Jika kick dilakukan selama dribbling, lepaskan dribbling
-  if (player.isKicking && player.isDribbling) {
-    player.isDribbling = false;
-  }
-
-  // Deteksi jika bola keluar lapangan (out)
-  if (
-    ball.x - ball.radius < 0 ||
-    ball.x + ball.radius > canvas.width ||
-    ball.y - ball.radius < 0 ||
-    ball.y + ball.radius > canvas.height
-  ) {
-    // Periksa bahwa bola tidak di area gawang
-    const isInGoalArea1 =
-      ball.x - ball.radius < goals[0].x + goals[0].width &&
-      ball.y > goals[0].y &&
-      ball.y < goals[0].y + goals[0].height;
-
-    const isInGoalArea2 =
-      ball.x + ball.radius > goals[1].x &&
-      ball.y > goals[1].y &&
-      ball.y < goals[1].y + goals[1].height;
-
-    if (!isInGoalArea1 && !isInGoalArea2) {
-      // Bola keluar (OUT)
-      isBallOut = true;
-      outMessageTimer = OUT_MESSAGE_DURATION;
-
-      // Matikan mode dribbling sebelum reset bola
-      player.isDribbling = false;
-
-      resetBall();
-      return;
-    }
-  }
-
-  // Deteksi gol
-  checkGoal();
-
-  // Deteksi tabrakan dengan pemain
-  if (circleCollision(player, ball)) {
-    const dx = ball.x - player.x;
-    const dy = ball.y - player.y;
-    const angle = Math.atan2(dy, dx);
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    const overlap = player.radius + ball.radius - distance;
-
-    // Dorong bola keluar dari pemain
-    ball.x += Math.cos(angle) * overlap;
-    ball.y += Math.sin(angle) * overlap;
-
-    // Transfer momentum
-    const power = Math.sqrt(
-      player.velocityX * player.velocityX + player.velocityY * player.velocityY
-    );
-    if (power > 0) {
-      ball.velocityX = Math.cos(angle) * power * 0.8;
-      ball.velocityY = Math.sin(angle) * power * 0.8;
-    }
-  }
-}
-
-// Deteksi apakah terjadi gol
-function checkGoal() {
-  for (const goal of goals) {
-    if (
-      ball.x - ball.radius < goal.x + goal.width &&
-      ball.x + ball.radius > goal.x &&
-      ball.y > goal.y &&
-      ball.y < goal.y + goal.height
-    ) {
-      // Gol terjadi, update skor
-      if (goal.team === 1) {
-        scoreTeam1++;
-        document.getElementById("team1").textContent = scoreTeam1;
-      } else {
-        scoreTeam2++;
-        document.getElementById("team2").textContent = scoreTeam2;
-      }
-
-      // Aktifkan pesan GOAL
-      goalMessageTimer = GOAL_MESSAGE_DURATION;
-
-      // Reset posisi bola
-      resetBall();
-      break;
-    }
-  }
-}
-
-// Reset posisi bola ke tengah
-function resetBall() {
-  // Matikan mode dribbling saat bola direset
-  player.isDribbling = false;
-
-  // Reset posisi bola
-  ball.x = canvas.width / 2;
-  ball.y = canvas.height / 2;
-  ball.velocityX = 0;
-  ball.velocityY = 0;
+  // Kirim posisi baru ke server
+  sendPlayerState();
 }
 
 // Render semua objek game
@@ -436,11 +314,101 @@ function render() {
     ctx.fillRect(goal.x, goal.y, goal.width, goal.height);
   }
 
-  // Gambar pemain
+  // Gambar semua pemain
+  Object.values(players).forEach((otherPlayer) => {
+    // Skip pemain ini karena kita gambar dari state lokal
+    if (otherPlayer.id === playerId) return;
+
+    // Gambar pemain lain
+    ctx.fillStyle = otherPlayer.team === 1 ? "red" : "blue";
+    ctx.beginPath();
+    ctx.arc(otherPlayer.x, otherPlayer.y, PLAYER_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Gambar tanda X merah jika pemain sedang tackling
+    if (otherPlayer.isTackling) {
+      // Tentukan warna X berdasarkan tim
+      ctx.strokeStyle = otherPlayer.team === 1 ? "blue" : "red";
+      ctx.lineWidth = 3;
+      const xSize = PLAYER_RADIUS * 0.8;
+
+      // Gambar garis X
+      ctx.beginPath();
+      ctx.moveTo(otherPlayer.x - xSize, otherPlayer.y - xSize);
+      ctx.lineTo(otherPlayer.x + xSize, otherPlayer.y + xSize);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(otherPlayer.x + xSize, otherPlayer.y - xSize);
+      ctx.lineTo(otherPlayer.x - xSize, otherPlayer.y + xSize);
+      ctx.stroke();
+    }
+
+    // Gambar ultimate gauge untuk pemain lain jika ada
+    if (otherPlayer.ultimateGauge > 0) {
+      const gaugePercentage = otherPlayer.ultimateGauge / MAX_ULTIMATE_GAUGE;
+      ctx.strokeStyle = getUltimateGaugeColor(gaugePercentage);
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(
+        otherPlayer.x,
+        otherPlayer.y,
+        PLAYER_RADIUS + 3,
+        0,
+        Math.PI * 2 * gaugePercentage
+      );
+      ctx.stroke();
+    }
+
+    // Menampilkan efek tendangan untuk pemain lain
+    if (otherPlayer.isKicking) {
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(otherPlayer.x, otherPlayer.y, PLAYER_RADIUS + 8, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Gambar indikator dribbling untuk pemain lain
+    if (otherPlayer.isDribbling) {
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 2]);
+      ctx.beginPath();
+      ctx.moveTo(otherPlayer.x, otherPlayer.y);
+      ctx.lineTo(ball.x, ball.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Gambar bar energi untuk pemain lain
+    drawPlayerEnergyBar(otherPlayer);
+  });
+
+  // Gambar pemain ini (local player)
   ctx.fillStyle = player.color;
   ctx.beginPath();
   ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
   ctx.fill();
+
+  // Gambar tanda X merah jika pemain sedang tackling
+  if (player.isTackling) {
+    // Tentukan warna X berdasarkan tim
+    ctx.strokeStyle = player.team === 1 ? "blue" : "red";
+    ctx.lineWidth = 3;
+    const xSize = player.radius * 0.8;
+
+    // Gambar garis X
+    ctx.beginPath();
+    ctx.moveTo(player.x - xSize, player.y - xSize);
+    ctx.lineTo(player.x + xSize, player.y + xSize);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(player.x + xSize, player.y - xSize);
+    ctx.lineTo(player.x - xSize, player.y + xSize);
+    ctx.stroke();
+  }
 
   // Gambar ultimate gauge di sekitar pemain jika ada
   if (player.ultimateGauge > 0) {
@@ -485,7 +453,7 @@ function render() {
   ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
   ctx.fill();
 
-  // Indikator dribbling
+  // Indikator dribbling untuk pemain ini
   if (player.isDribbling) {
     ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
     ctx.lineWidth = 2;
@@ -497,7 +465,7 @@ function render() {
     ctx.setLineDash([]);
   }
 
-  // Gambar bar energi di bawah pemain
+  // Gambar bar energi di bawah pemain ini
   drawEnergyBar();
 
   // Tampilkan pesan OUT jika bola keluar
@@ -511,6 +479,13 @@ function render() {
     drawGoalMessage();
     goalMessageTimer--;
   }
+
+  // Tampilkan ID dan nama tim pemain di pojok atas
+  ctx.font = "14px Arial";
+  ctx.fillStyle = "white";
+  ctx.textAlign = "left";
+  ctx.fillText(`Player ID: ${playerId || "Connecting..."}`, 10, 20);
+  ctx.fillText(`Team: ${player.team === 1 ? "Red" : "Blue"}`, 10, 40);
 }
 
 // Gambar lapangan
@@ -535,6 +510,38 @@ function drawField() {
   ctx.beginPath();
   ctx.arc(canvas.width / 2, canvas.height / 2, 60, 0, Math.PI * 2);
   ctx.stroke();
+}
+
+// Fungsi untuk menggambar bar energi pemain lain
+function drawPlayerEnergyBar(otherPlayer) {
+  const barWidth = PLAYER_RADIUS * 2;
+  const barHeight = 5;
+  const energyPercentage = otherPlayer.energy / MAX_ENERGY;
+
+  // Background bar (abu-abu)
+  ctx.fillStyle = "rgba(200, 200, 200, 0.7)";
+  ctx.fillRect(
+    otherPlayer.x - barWidth / 2,
+    otherPlayer.y + PLAYER_RADIUS + 5,
+    barWidth,
+    barHeight
+  );
+
+  // Energy bar (hijau atau kuning atau merah berdasarkan level energi)
+  if (energyPercentage > 0.7) {
+    ctx.fillStyle = "rgba(0, 255, 0, 0.7)"; // Hijau
+  } else if (energyPercentage > 0.3) {
+    ctx.fillStyle = "rgba(255, 255, 0, 0.7)"; // Kuning
+  } else {
+    ctx.fillStyle = "rgba(255, 0, 0, 0.7)"; // Merah
+  }
+
+  ctx.fillRect(
+    otherPlayer.x - barWidth / 2,
+    otherPlayer.y + PLAYER_RADIUS + 5,
+    barWidth * energyPercentage,
+    barHeight
+  );
 }
 
 // Fungsi untuk menggambar bar energi
@@ -609,39 +616,6 @@ function getUltimateGaugeColor(percentage) {
   }
 }
 
-// Fungsi untuk melakukan pass/mengoper bola
-function passBall() {
-  const dx = ball.x - player.x;
-  const dy = ball.y - player.y;
-  const distance = Math.sqrt(dx * dx + dy * dy);
-
-  // Hanya bisa pass jika dekat dengan bola
-  if (distance < player.radius + ball.radius + 10) {
-    // Arah gerakan pemain atau arah default jika diam
-    let moveAngle;
-
-    if (player.velocityX !== 0 || player.velocityY !== 0) {
-      // Jika pemain bergerak, arah pass mengikuti arah gerakan
-      moveAngle = Math.atan2(player.velocityY, player.velocityX);
-    } else {
-      // Jika pemain diam, arah pass adalah arah bola saat ini dari pemain
-      moveAngle = Math.atan2(dy, dx);
-    }
-
-    // Berhenti dribbling jika sedang dribbling
-    if (player.isDribbling) {
-      player.isDribbling = false;
-    }
-
-    // Efek visual saat pass
-    showPassEffect();
-
-    // Terapkan kecepatan ke bola
-    ball.velocityX = Math.cos(moveAngle) * PASS_POWER;
-    ball.velocityY = Math.sin(moveAngle) * PASS_POWER;
-  }
-}
-
 // Fungsi untuk menampilkan efek visual saat pass
 function showPassEffect() {
   // Efek kilatan sementara di sekitar bola
@@ -677,14 +651,35 @@ function showPassEffect() {
   drawPassEffect();
 }
 
-// Game loop
+// Game loop - kini hanya untuk rendering dan mengirim input
 function gameLoop() {
-  updatePlayerPosition();
-  updateBallPosition();
+  if (gameStarted) {
+    updatePlayerPosition(); // Hanya update client-side untuk prediksi
+  }
   render();
   requestAnimationFrame(gameLoop);
 }
 
 // Mulai game
-resetBall();
 gameLoop();
+
+// Tampilkan pesan menunggu pemain lain
+function showWaitingScreen() {
+  ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.font = "30px Arial";
+  ctx.fillStyle = "white";
+  ctx.textAlign = "center";
+  ctx.fillText("Menunggu pemain lain...", canvas.width / 2, canvas.height / 2);
+}
+
+// Game loop pembuka - tampilkan layar menunggu hingga game dimulai
+function waitingLoop() {
+  if (!gameStarted) {
+    showWaitingScreen();
+    requestAnimationFrame(waitingLoop);
+  }
+}
+
+// Mulai dengan menampilkan layar menunggu
+waitingLoop();
